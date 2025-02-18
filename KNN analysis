@@ -1,0 +1,116 @@
+# Load required libraries
+library(ggplot2)
+library(dplyr)
+library(class)
+library(gmodels)
+library(gridExtra)
+library(rsample)
+library(pROC)
+
+# K-Nearest Neighbors (KNN) is a machine learning algorithm used to classify data points 
+# into groups based on their features. It compares unknown elements to previously known 
+# examples and assigns them to the same group as their nearest "neighbors."
+
+##### Data Processing ---- 
+
+# Set a seed for reproducibility
+set.seed(123)
+
+# Load the dataset
+wbcd <- read.csv("~/Documents/Pasta com os dados de R/Machine learning scripts/breast+cancer+wisconsin+diagnostic/wdbc.data", 
+                 header = FALSE)
+
+# Rename columns for better readability
+colnames(wbcd) <- c("ID", "Diagnosis", "Radius_mean", "Texture_mean", "Perimeter_mean", 
+                    "Area_mean", "Smoothness_mean", "Compactness_mean", "Concavity_mean", 
+                    "Concave_points_mean", "Symmetry_mean", "Fractal_dimension_mean", 
+                    "Radius_se", "Texture_se", "Perimeter_se", "Area_se", "Smoothness_se", 
+                    "Compactness_se", "Concavity_se", "Concave_points_se", "Symmetry_se", 
+                    "Fractal_dimension_se", "Radius_worst", "Texture_worst", "Perimeter_worst", 
+                    "Area_worst", "Smoothness_worst", "Compactness_worst", "Concavity_worst", 
+                    "Concave_points_worst", "Symmetry_worst", "Fractal_dimension_worst")
+
+# Display the structure of the data
+str(wbcd)
+
+# Remove the "ID" column since it's not relevant for the analysis
+wbcd <- wbcd[,-1]
+
+# Check the distribution of the target variable ("Diagnosis")
+table(wbcd$Diagnosis)
+
+# Convert the Diagnosis column to a factor with two levels: "Benign" and "Malignant"
+wbcd$Diagnosis <- factor(wbcd$Diagnosis, levels = c("B", "M"), labels = c("Benign", "Malignant"))
+
+# Calculate and display the proportion of each diagnosis
+round(prop.table(table(wbcd$Diagnosis)) * 100, digits = 1)
+
+# Display summary statistics for a subset of numerical columns
+summary(wbcd[c("Radius_mean", "Area_mean", "Smoothness_mean")])
+
+# Normalize numerical features using Z-score normalization
+normalize <- function(x) { 
+  return((x - min(x)) / (max(x) - min(x)))
+} # This function scales values to a range between 0 and 1
+
+# Apply the normalization function to all numerical columns (excluding the Diagnosis column)
+wbcd_n <- as.data.frame(lapply(wbcd[2:31], normalize))
+
+# Display summary statistics for a normalized column to verify
+summary(wbcd_n$Area_mean)
+
+# Split the dataset into training (first 469 rows) and testing sets (last 100 rows)
+wbcd_train <- wbcd_n[1:469,]
+wbcd_test <- wbcd_n[470:569,]
+
+# Extract the corresponding labels for training and testing sets
+wbcd_train_labels <- wbcd[1:469, 1]
+wbcd_test_labels <- wbcd[470:569, 1]
+
+# Fit the KNN model with k = 21
+k_value <- 21
+knn_pred <- knn(train = wbcd_train, test = wbcd_test, 
+                cl = wbcd_train_labels, k = k_value, prob = TRUE)
+
+# Evaluate the model using a cross-tabulation
+CrossTable(x = wbcd_test_labels, y = knn_pred)
+
+##### Visualizations ---- 
+
+# ROC Curve Analysis
+probabilities <- attr(knn_pred, "prob")
+probabilities <- ifelse(knn_pred == "Malignant", probabilities, 1 - probabilities)
+
+# Calculate the ROC curve and AUC
+roc_obj <- roc(wbcd_test_labels, probabilities)
+auc_value <- auc(roc_obj)
+
+# Create a dataframe for plotting the ROC curve
+roc_df <- data.frame(
+  TPR = rev(roc_obj$sensitivities),
+  FPR = rev(1 - roc_obj$specificities)
+)
+
+# Plot the ROC curve
+ggplot(roc_df, aes(x = FPR, y = TPR)) +
+  geom_line(color = "blue") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(x = "False Positive Rate (1 - Specificity)", y = "True Positive Rate (Sensitivity)",
+       title = paste("ROC Curve (AUC =", round(auc_value, 2), ")")) +
+  theme_minimal()
+
+# K-NN Results Visualization (Scatter Plot Example)
+result_data <- data.frame(
+  knn_pred = as.factor(knn_pred),
+  wbcd_test
+)
+
+# Customize variables for the scatter plot
+ggplot(result_data, aes(x = Radius_mean, y = Area_mean, color = knn_pred)) +
+  geom_point(size = 3, alpha = 0.7) +
+  labs(title = "K-NN Classification Results",
+       x = "Radius Mean",
+       y = "Area Mean",
+       color = "Prediction") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
