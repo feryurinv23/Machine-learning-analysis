@@ -1,0 +1,111 @@
+# Load required libraries
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Load datasets (replace the file paths with the appropriate dataset for each condition)
+# Load data for Alzheimer's Disease (AD)
+my_data <- read.delim("~/Documents/raw_data/Collaborations/Julia/GBM_julia/GBM_AD.txt", row.names = 1) 
+# Load data for Multiple Sclerosis (MS)
+my_data <- read.delim("~/Documents/raw_data/Collaborations/Julia/GBM_julia/GBM_MS.txt", row.names = 1) 
+# Load data for Parkinson's Disease (PD)
+my_data <- read.delim("~/Documents/raw_data/Collaborations/Julia/GBM_julia/GBM_PD.txt", row.names = 1) 
+
+# Define color palettes specific to each group (use appropriate color schemes for the disease)
+group_colors <- c("0" = "#77cacb", "1" = "#4a2e66") # AD
+group_colors <- c("0" = "#77cacb", "1" = "#ff8531") # MS
+group_colors <- c("0" = "#77cacb", "1" = "#4158A6") # PD
+
+# List of genes for Alzheimer's Disease (AD)
+genes <- c("KCNAB2", "ABHD17A", "NCAM2", "RPL23A", "AKT1", 
+           "FMR1", "RPS28", "BRSK1", "VEZT", "EIF1AX") 
+
+# Subset relevant genes and include the grade column
+my_data <- data.frame(KCNAB2 = my_data$KCNAB2,
+                      ABHD17A = my_data$ABHD17A,
+                      NCAM2 = my_data$NCAM2,
+                      RPL23A = my_data$RPL23A,
+                      AKT1 = my_data$AKT1,
+                      FMR1 = my_data$FMR1,
+                      RPS28 = my_data$RPS28,
+                      BRSK1 = my_data$BRSK1,
+                      VEZT = my_data$VEZT,
+                      EIF1AX = my_data$EIF1AX,
+                      grade = my_data$groups)
+
+# Repeat similar steps for MS
+genes <- c("CAPRIN1", "RAB10", "CTBP2", "EIF5A", "MINK1", 
+           "ABLIM1", "DNM1L", "USP14", "MAP1LC3A", "CPLX1") 
+
+my_data <- data.frame(CAPRIN1 = my_data$CAPRIN1,
+                      RAB10 = my_data$RAB10,
+                      CTBP2 = my_data$CTBP2,
+                      EIF5A = my_data$EIF5A,
+                      MINK1 = my_data$MINK1,
+                      ABLIM1 = my_data$ABLIM1,
+                      DNM1L = my_data$DNM1L,
+                      USP14 = my_data$USP14,
+                      MAP1LC3A = my_data$MAP1LC3A,
+                      CPLX1 = my_data$CPLX1,
+                      grade = my_data$groups)
+
+# Repeat similar steps for PD
+genes <- c("ATP6V1D", "ARHGAP12", "SLC6A6", "PRKACA", "CTBP2", 
+           "RPL30", "STAU1", "PICALM", "LHFPL4", "LRFN4") 
+
+my_data <- data.frame(ATP6V1D = my_data$ATP6V1D,
+                      ARHGAP12 = my_data$ARHGAP12,
+                      SLC6A6 = my_data$SLC6A6,
+                      PRKACA = my_data$PRKACA,
+                      CTBP2 = my_data$CTBP2,
+                      RPL30 = my_data$RPL30,
+                      STAU1 = my_data$STAU1,
+                      PICALM = my_data$PICALM,
+                      LHFPL4 = my_data$LHFPL4,
+                      LRFN4 = my_data$LRFN4,
+                      grade = my_data$groups)
+
+# Initialize a list to store p-values
+p_values <- list()
+
+# Fit logistic regression for each gene and calculate the p-value
+for (gene in genes) {
+  formula <- as.formula(paste("grade ~", gene))
+  result <- glm(formula, data = my_data, family = binomial(link = "logit"))
+  p_value <- summary(result)$coefficients[2, 4]
+  p_values[[gene]] <- p_value
+}
+
+# Transform the data to a long format
+my_data_long <- my_data %>%
+  gather(key = "gene", value = "expression", ATP6V1D:LRFN4)
+
+# Add p-values to the long-format data
+my_data_long <- my_data_long %>%
+  mutate(p_value = unlist(p_values[gene]))
+
+# Create the plot with specified colors
+p <- ggplot(my_data_long, aes(x = expression, y = grade)) +
+  geom_point(aes(color = factor(grade)), alpha = 0.6) +  # Add points
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE, color = "#179BAE") +  # Add regression line with confidence interval
+  facet_wrap(~gene, scales = "free_x") +  # Create facets for each gene
+  geom_text(data = my_data_long %>% distinct(gene, p_value), 
+            aes(label = paste0("P = ", signif(p_value, 3)), 
+                x = Inf, y = Inf), hjust = 1.1, vjust = 2.5, size = 4, color = "black") +  # Add p-values
+  labs(title = "",
+       x = "Gene Expression",
+       y = "Grade") +
+  scale_color_manual(values = group_colors) +  # Use predefined colors for groups
+  theme_minimal() +
+  theme(legend.position = "none") + 
+  theme(axis.text.x = element_text(size = 20),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 20),
+        axis.title.y = element_text(size = 20),
+        strip.text = element_text(size = 20))
+
+# Save the plot as PNG
+png(filename = "Logistic_Regression_PD.png", width = 4000, height = 3500, units = "px",
+    bg = "transparent", res = 300)
+print(p)
+dev.off()
