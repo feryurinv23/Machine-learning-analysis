@@ -1,0 +1,111 @@
+# Load required libraries
+library(RegParallel)  # For parallelized Cox regression
+library(dplyr)        # For data manipulation
+library(ggplot2)      # For data visualization
+library(openxlsx)     # For exporting results to Excel
+
+# Load gene expression data
+LAML <- read.delim("~/Documents/MBA/TCC/TCGA.LAML.sampleMap/HiSeqV2", row.names = 1)
+
+# Load survival metadata
+mdata <- read.delim("survival/LAML_survival.txt")
+
+# Create a data frame for matching sample IDs
+samples_LAML <- data.frame("sample" = colnames(LAML), "value" = NA)
+
+# Replace dashes with dots in sample names for consistency
+mdata$sample <- gsub("-", ".", mdata$sample)
+
+# Merge gene expression sample data with metadata
+mdata <- merge(samples_LAML, mdata, by = "sample")
+
+# Retain relevant columns: sample, OS (Overall Survival), and OS.time
+mdata <- mdata[, c(1, 4, 5)]
+
+# Prepare survival data frame
+survival.data <- data.frame(
+  time = mdata$OS.time,  # Survival time
+  event = mdata$OS,      # Event indicator (alive=0; dead=1)
+  Id = mdata$sample      # Unique patient identifier
+)
+
+# Transpose the gene expression data for compatibility
+LAML_t <- data.frame(t(LAML))
+LAML_t$Id <- rownames(LAML_t)
+
+# Ensure consistency in sample IDs between survival data and gene expression data
+survival.data$Id <- gsub("-", ".", survival.data$Id)
+
+# Merge survival data with transposed gene expression data
+data_a <- merge(survival.data, LAML_t, by = "Id")
+rownames(data_a) <- data_a$Id
+data_a <- data_a[, -1]  # Remove the "Id" column after setting row names
+
+# Cox Regression using RegParallel
+set.seed(2025.1)  # Set a seed for reproducibility
+res <- RegParallel(
+  data = data_a,  # Dataset used for regression
+  formula = 'Surv(time = time, event = event) ~ `[*]`',  # Cox model with one predictor at a time
+  FUN = function(formula, data_a) 
+    coxph(formula = formula,
+          data = data_a,
+          ties = 'breslow',
+          singular.ok = TRUE),  # Function to run Cox regression
+  FUNtype = 'coxph',  # Specify the function type as coxph (Cox regression)
+  variables = colnames(data_a)[3:ncol(data_a)],  # Variables to test (from the 3rd column onward)
+  cores = 6,  # Number of CPU cores to use
+  blocksize = 2000,  # Number of variables to process per block
+  nestedParallel = FALSE,  # Disable nested parallelism to avoid system overload
+  conflevel = 95  # Confidence level for hazard ratio estimates
+)
+
+# Adjust p-values using the Benjamini-Hochberg method
+res$LogRank_adj <- p.adjust(res$LogRank, method = 'BH')
+
+# Filter significant results (adjusted p-value < 0.01)
+res_sig <- res[res$LogRank_adj < 0.01, ]
+
+# Save the results to an Excel file
+openxlsx::write.xlsx(res_sig, "~/Documents/MBA/TCC/Resultados/regression_results.xlsx")
+
+# Visualize Beta coefficients
+p1 <- ggplot(res_sig, aes(x = reorder(Variable, Beta), y = Beta)) +
+  geom_bar(stat = 'identity', fill = '#2973B2') + 
+  geom_errorbar(aes(ymin = Beta - StandardError, ymax = Beta + StandardError), 
+                width = 0.2, color = 'black') +
+  coord_flip() +  # Flip coordinates for better readability
+  labs(title = "Beta Coefficients from Cox Regression Model", 
+       x = "Variables", 
+       y = "Beta Value") +
+  theme_bw() + 
+  theme(axis.text.x = element_text(size = 20), 
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 20),
+        axis.title.y = element_text(size = 20),
+        title = element_text(size = 20))
+
+# Save Beta coefficients plot as PNG
+png("Coeficientes_Beta.png", width = 3500, height = 3000, units = "px", res = 300, bg = "transparent")
+p1
+dev.off()
+
+# Visualize Hazard Ratios (HR)
+p2 <- ggplot(res_sig, aes(x = reorder(Variable, HR), y = HR)) +
+  geom_bar(stat = 'identity', fill = '#48A6A7') +
+  geom_errorbar(aes(ymin = HR - StandardError, ymax = HR + StandardError), 
+                width = 0.2, color = 'black') +
+  coord_flip() +
+  labs(title = "Hazard Ratios (HR) from Cox Regression Model", 
+       x = "Variables", 
+       y = "Hazard Ratio (HR)") +
+  theme_bw() + 
+  theme(axis.text.x = element_text(size = 20), 
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 20),
+        axis.title.y = element_text(size = 20),
+        title = element_text(size = 20))
+
+# Save Hazard Ratios plot as PNG
+png("Hazard_Ratios.png", width = 3500, height = 3000, units = "px", res = 300, bg = "transparent")
+p2
+dev.off()
